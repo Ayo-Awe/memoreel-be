@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS "users" (
 	CONSTRAINT users_email_key UNIQUE NULLS NOT DISTINCT (email, deleted_at)
 );
 
-CREATE TYPE "reel_delivery_status" AS ENUM ('unconfirmed', 'scheduled', 'deivered', 'failed');
+CREATE TYPE "reel_delivery_status" AS ENUM ('unconfirmed', 'scheduled', 'delivered', 'failed');
 
 CREATE TABLE IF NOT EXISTS "videos" (
 	"id" CHAR(26) PRIMARY KEY,
@@ -33,11 +33,11 @@ CREATE TABLE IF NOT EXISTS "reels"(
 	"id" CHAR(26) PRIMARY KEY,
 	"user_id" CHAR(26) REFERENCES users(id),
 	"video_id" CHAR(26) NOT NULL REFERENCES videos(id),
-	"email" CHAR(255) NOT NULL,
-	"title" CHAR(255) NOT NULL,
-	"description" TEXT,
+	"email" VARCHAR(255) NOT NULL,
+	"title" VARCHAR(255) NOT NULL,
+	"description" TEXT NOT NULL DEFAULT(''),
 	"private" BOOLEAN NOT NULL DEFAULT(true),
-	"email_confirmation_token" CHAR(255),
+	"email_confirmation_token" VARCHAR(255),
 	"delivery_status" reel_delivery_status NOT NULL DEFAULT ('unconfirmed'),
 	"delivery_date" TIMESTAMPTZ NOT NULL,
 	"recipients" JSONB NOT NULL,
