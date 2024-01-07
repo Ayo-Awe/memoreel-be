@@ -125,9 +125,13 @@ var (
 	ErrRecipientNotFound = errors.New("recipient not found")
 )
 
+type ReelFilter struct {
+	DeliveryStatus ReelDeliveryStatus
+}
+
 type Reel struct {
 	UID                    string             `json:"id" db:"id"`
-	UserID                 string             `json:"user_id" db:"user_id"`
+	UserID                 null.String        `json:"user_id" db:"user_id"`
 	VideoID                string             `json:"video_id" db:"video_id"`
 	Email                  string             `json:"email" db:"email"`
 	Title                  string             `json:"title,omitempty" db:"title,omitempty"`
@@ -152,4 +156,42 @@ func (r Reel) FindRecipient(recipientID string) *Recipient {
 	}
 
 	return nil
+}
+
+type PageDirection string
+
+type Pageable struct {
+	PerPage int    `json:"per_page"`
+	Cursor  string `json:"cursor"`
+}
+
+func (p Pageable) Limit() int {
+	return p.PerPage + 1
+}
+
+type PreviousRowCount struct {
+	Count int
+}
+
+type PaginationData struct {
+	PerPage      int    `json:"per_page"`
+	Cursor       string `json:"cursor"`
+	HasMorePages bool   `json:"has_more_pages"`
+}
+
+func (p *PaginationData) Build(pageable Pageable, items []string) *PaginationData {
+	p.PerPage = pageable.PerPage
+
+	var last string
+
+	if len(items) > 0 {
+		last = items[len(items)-1]
+	}
+
+	p.Cursor = last
+
+	// an extra exists. It's used to check if there are more pages to be loaded
+	p.HasMorePages = len(items) > p.PerPage
+
+	return p
 }

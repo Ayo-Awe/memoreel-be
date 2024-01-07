@@ -50,8 +50,7 @@ const (
 	WHERE %s = $1 AND deleted_at IS NULL;
 	`
 
-	// TODO: Implement cursor based pagination
-	fetchReels = `
+	fetchReelsPaged = `
 	SELECT
 		id,
 		user_id,
@@ -68,7 +67,20 @@ const (
 		created_at,
 		deleted_at
 	FROM reels
-	WHERE %s = $1 AND deleted_at IS NULL;
+	WHERE deleted_at IS NULL
+	%s
+	AND id < :cursor
+	ORDER BY id DESC
+	LIMIT :limit;
+	`
+
+	baseReelsFilter = `
+	AND user_id = :user_id
+	`
+
+	reelDeliveryStatusFilter = `
+	%s
+	AND delivery_status = :delivery_status
 	`
 
 	updateReel = `
@@ -84,6 +96,14 @@ const (
 		email_confirmation_token = $10,
 		updated_at = NOW()
 	WHERE id = $1 AND deleted_at IS NULL;
+	`
+
+	assignReelsToUserByEmail = `
+	UPDATE reels SET
+		user_id = $2
+	WHERE user_id IS NULL
+	AND email = $1
+	AND deleted_at IS NULL;
 	`
 
 	// postgres jsonb array concatenation
@@ -136,28 +156,6 @@ func (r reelRepo) GetReelByID(ctx context.Context, id string) (*datastore.Reel, 
 	return reel, nil
 }
 
-func (r reelRepo) GetReelsByEmail(ctx context.Context, email string) ([]datastore.Reel, error) {
-	var reels []datastore.Reel
-	rows, err := r.db.QueryxContext(ctx, fmt.Sprintf(fetchReels, "email"), email)
-
-	if err != nil {
-		return nil, err
-	}
-
-	for rows.Next() {
-		reel := datastore.Reel{}
-		err = rows.StructScan(&reel)
-
-		if err != nil {
-			return nil, err
-		}
-
-		reels = append(reels, reel)
-	}
-
-	return reels, nil
-}
-
 func (r reelRepo) GetReelByEmailConfirmationToken(ctx context.Context, token string) (*datastore.Reel, error) {
 	reel := &datastore.Reel{}
 	err := r.db.QueryRowxContext(ctx, fmt.Sprintf(fetchReel, "email_confirmation_token"), token).StructScan(reel)
@@ -172,26 +170,52 @@ func (r reelRepo) GetReelByEmailConfirmationToken(ctx context.Context, token str
 	return reel, nil
 }
 
-func (r reelRepo) GetReelsByUserID(ctx context.Context, userID string) ([]datastore.Reel, error) {
-	var reels []datastore.Reel
-	rows, err := r.db.QueryxContext(ctx, fmt.Sprintf(fetchReels, "user_id"), userID)
-
-	if err != nil {
-		return nil, err
+func (r reelRepo) GetReelsPaged(ctx context.Context, userID string, filter datastore.ReelFilter, pageable datastore.Pageable) ([]datastore.Reel, datastore.PaginationData, error) {
+	queryFilter := baseReelsFilter
+	args := map[string]interface{}{
+		"user_id": userID,
+		"cursor":  pageable.Cursor,
+		"limit":   pageable.Limit(),
 	}
 
+	if filter.DeliveryStatus.IsValid() {
+		args["delivery_status"] = filter.DeliveryStatus
+		queryFilter = fmt.Sprintf(reelDeliveryStatusFilter, queryFilter)
+	}
+
+	query := fetchReelsPaged
+	query = fmt.Sprintf(query, queryFilter)
+
+	rows, err := r.db.NamedQueryContext(ctx, query, args)
+	if err != nil {
+		return nil, datastore.PaginationData{}, err
+	}
+
+	var reels []datastore.Reel
 	for rows.Next() {
 		reel := datastore.Reel{}
 		err = rows.StructScan(&reel)
 
 		if err != nil {
-			return nil, err
+			return nil, datastore.PaginationData{}, err
 		}
 
 		reels = append(reels, reel)
 	}
 
-	return reels, nil
+	ids := make([]string, len(reels))
+	for i := range reels {
+		ids[i] = reels[i].UID
+	}
+
+	if len(reels) > pageable.PerPage {
+		reels = reels[:len(reels)-1]
+	}
+
+	pagination := &datastore.PaginationData{}
+	pagination.Build(pageable, ids)
+
+	return reels, *pagination, nil
 }
 
 func (r reelRepo) CreateReel(ctx context.Context, reel *datastore.Reel) error {
@@ -243,6 +267,15 @@ func (r reelRepo) UpdateReel(ctx context.Context, reel *datastore.Reel) error {
 
 	if rowsAffected < 1 {
 		return ErrReelNotUpdated
+	}
+
+	return nil
+}
+
+func (r reelRepo) AssignReelsToUserByEmail(ctx context.Context, email string, userID string) error {
+	_, err := r.db.ExecContext(ctx, assignReelsToUserByEmail, email, userID)
+	if err != nil {
+		return err
 	}
 
 	return nil

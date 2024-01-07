@@ -13,8 +13,6 @@ import (
 	"gopkg.in/guregu/null.v4"
 )
 
-type reels []datastore.Reel
-
 func TestCreateReel(t *testing.T) {
 	db, closeFn := getDB(t)
 	defer closeFn()
@@ -75,98 +73,98 @@ func TestGetReelByConfirmationToken(t *testing.T) {
 	require.Equal(t, reel, dbReel)
 }
 
-func TestGetReelsByEmail(t *testing.T) {
+func TestGetReelsPaged(t *testing.T) {
 	db, closeFn := getDB(t)
 	defer closeFn()
 
 	reelRepo := NewReelRepo(db)
+	user := seedUser(t, db)
 
-	user1 := seedUser(t, db)
-	video1 := seedVideo(t, db)
-	reel := &datastore.Reel{
-		UID:                    ulid.Make().String(),
-		UserID:                 user1.UID,
-		VideoID:                video1.UID,
-		Email:                  "testemail@memoreel.com",
-		Title:                  "Test Reel",
-		Description:            "",
-		Private:                true,
-		Recipients:             generateRecipients(2),
-		EmailConfirmationToken: ulid.Make().String(),
-		DeliveryStatus:         datastore.UnconfirmedReelStatus,
-		DeliveryDate:           time.Now().Add(time.Hour * 24 * 4),
+	var reels []datastore.Reel
+
+	for i := 0; i < 8; i++ {
+		video := seedVideo(t, db)
+		reel := generateReel(video.UID, user.UID)
+
+		if i == 0 || i == 2 || i == 4 {
+			reel.DeliveryStatus = datastore.ScheduledReelStatus
+		} else {
+			reel.DeliveryStatus = datastore.UnconfirmedReelStatus
+		}
+
+		require.NoError(t, reelRepo.CreateReel(context.Background(), reel))
+		reels = append(reels, *reel)
 	}
 
-	user2 := seedUser(t, db)
-	video2 := seedVideo(t, db)
-	reelWithMatchingEmail := &datastore.Reel{
-		UID:                    ulid.Make().String(),
-		UserID:                 user2.UID,
-		VideoID:                video2.UID,
-		Email:                  "testemail@memoreel.com",
-		Title:                  "Test Reel",
-		Description:            "",
-		Private:                true,
-		Recipients:             generateRecipients(2),
-		EmailConfirmationToken: ulid.Make().String(),
-		DeliveryStatus:         datastore.UnconfirmedReelStatus,
-		DeliveryDate:           time.Now().Add(time.Hour * 24 * 4),
-	}
-
-	user3 := seedUser(t, db)
-	video3 := seedVideo(t, db)
-	reelWithDifferentEmail := generateReel(video3.UID, user3.UID)
-
-	res, err := reelRepo.GetReelsByEmail(context.Background(), reel.Email)
+	// Fetch with empty filter
+	pageable := datastore.Pageable{PerPage: 20, Cursor: "7ZZZZZZZZZZZZZZZZZZZZZZZZZ"}
+	filter := datastore.ReelFilter{}
+	reels, PaginationData, err := reelRepo.GetReelsPaged(context.Background(), user.UID, filter, pageable)
 	require.NoError(t, err)
-	require.True(t, len(res) == 0)
 
-	require.NoError(t, reelRepo.CreateReel(context.Background(), reel))
-	require.NoError(t, reelRepo.CreateReel(context.Background(), reelWithMatchingEmail))
-	require.NoError(t, reelRepo.CreateReel(context.Background(), reelWithDifferentEmail))
+	require.Len(t, reels, 8)
+	require.False(t, PaginationData.HasMorePages)
 
-	foundReels, err := reelRepo.GetReelsByEmail(context.Background(), reel.Email)
+	// Filter with delivery status scheduled
+	pageable = datastore.Pageable{PerPage: 4, Cursor: "7ZZZZZZZZZZZZZZZZZZZZZZZZZ"}
+	filter = datastore.ReelFilter{DeliveryStatus: datastore.ScheduledReelStatus}
+	reels, PaginationData, err = reelRepo.GetReelsPaged(context.Background(), user.UID, filter, pageable)
 	require.NoError(t, err)
-	require.Equal(t, len(foundReels), 2)
 
-	fr := reels(foundReels)
-	require.NotNil(t, fr.find(reel.UID))
-	require.NotNil(t, fr.find(reelWithMatchingEmail.UID))
+	require.Len(t, reels, 3)
+	require.False(t, PaginationData.HasMorePages)
+
+	// Filter with delivery status unconfirmed
+	pageable = datastore.Pageable{PerPage: 3, Cursor: "7ZZZZZZZZZZZZZZZZZZZZZZZZZ"}
+	filter = datastore.ReelFilter{DeliveryStatus: datastore.UnconfirmedReelStatus}
+	reels, PaginationData, err = reelRepo.GetReelsPaged(context.Background(), user.UID, filter, pageable)
+	require.NoError(t, err)
+
+	require.Len(t, reels, 3)
+	require.True(t, PaginationData.HasMorePages)
+	require.NotEmpty(t, PaginationData.Cursor)
 
 }
 
-func TestGetReelsByUserID(t *testing.T) {
+func TestAssignReelsToUserByEmail(t *testing.T) {
 	db, closeFn := getDB(t)
 	defer closeFn()
 
 	reelRepo := NewReelRepo(db)
+	user := seedUser(t, db)
 
-	user1 := seedUser(t, db)
-	video1 := seedVideo(t, db)
-	reel := generateReel(video1.UID, user1.UID)
+	var reels []datastore.Reel
+	for i := 0; i < 8; i++ {
+		video := seedVideo(t, db)
+		reel := generateReel(video.UID, "")
+		reel.UserID = null.NewString("", false)
 
-	video2 := seedVideo(t, db)
-	reelWithMatchingUserID := generateReel(video2.UID, user1.UID)
+		if i == 0 || i == 2 || i == 4 {
+			reel.Email = user.Email
+		}
 
-	user2 := seedUser(t, db)
-	video3 := seedVideo(t, db)
-	reelWithDifferentUserID := generateReel(video3.UID, user2.UID)
+		require.NoError(t, reelRepo.CreateReel(context.Background(), reel))
+		reels = append(reels, *reel)
+	}
 
-	res, err := reelRepo.GetReelsByUserID(context.Background(), reel.UserID)
+	defaultPerpage := 10
+
+	pageable := datastore.Pageable{Cursor: "7ZZZZZZZZZZZZZZZZZZZZZZZZZ", PerPage: defaultPerpage}
+	filter := datastore.ReelFilter{}
+	reels, _, err := reelRepo.GetReelsPaged(context.Background(), user.UID, filter, pageable)
+
 	require.NoError(t, err)
-	require.True(t, len(res) == 0)
+	require.Len(t, reels, 0)
 
-	require.NoError(t, reelRepo.CreateReel(context.Background(), reel))
-	require.NoError(t, reelRepo.CreateReel(context.Background(), reelWithMatchingUserID))
-	require.NoError(t, reelRepo.CreateReel(context.Background(), reelWithDifferentUserID))
-
-	foundReels, err := reelRepo.GetReelsByUserID(context.Background(), reel.UserID)
+	err = reelRepo.AssignReelsToUserByEmail(context.Background(), user.Email, user.UID)
 	require.NoError(t, err)
-	require.Equal(t, len(foundReels), 2)
 
-	fr := reels(foundReels)
-	require.NotNil(t, fr.find(reel.UID))
-	require.NotNil(t, fr.find(reelWithMatchingUserID.UID))
+	pageable = datastore.Pageable{Cursor: "7ZZZZZZZZZZZZZZZZZZZZZZZZZ", PerPage: defaultPerpage}
+	filter = datastore.ReelFilter{}
+	reels, _, err = reelRepo.GetReelsPaged(context.Background(), user.UID, filter, pageable)
+
+	require.NoError(t, err)
+	require.Len(t, reels, 3)
 }
 
 func TestUpdateReel(t *testing.T) {
@@ -183,7 +181,7 @@ func TestUpdateReel(t *testing.T) {
 
 	updatedReel := &datastore.Reel{
 		UID:                    reel.UID,
-		UserID:                 user.UID,
+		UserID:                 null.NewString(user.UID, true),
 		VideoID:                video.UID,
 		Email:                  "fakemail@gmail.com",
 		Title:                  "Test",
@@ -295,7 +293,7 @@ func TestDeleteRecipient(t *testing.T) {
 func generateReel(videoID, userID string) *datastore.Reel {
 	return &datastore.Reel{
 		UID:                    ulid.Make().String(),
-		UserID:                 userID,
+		UserID:                 null.NewString(userID, true),
 		VideoID:                videoID,
 		Email:                  fmt.Sprintf("%s@memoreel.com", ulid.Make().String()),
 		Title:                  "Test Reel",
@@ -361,15 +359,4 @@ func seedVideo(t *testing.T, db database.Database) *datastore.Video {
 	require.NoError(t, err)
 
 	return video
-}
-
-func (r reels) find(id string) *datastore.Reel {
-	for i := range r {
-		reel := &r[i]
-		if reel.UID == id {
-			return reel
-		}
-	}
-
-	return nil
 }

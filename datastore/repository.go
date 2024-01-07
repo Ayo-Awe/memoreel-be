@@ -1,6 +1,8 @@
 package datastore
 
-import "context"
+import (
+	"context"
+)
 
 type UserRepository interface {
 	GetUserByID(context.Context, string) (*User, error)
@@ -14,11 +16,11 @@ type UserRepository interface {
 
 type ReelRepository interface {
 	GetReelByID(context.Context, string) (*Reel, error)
-	GetReelsByUserID(context.Context, string) ([]Reel, error)
-	GetReelsByEmail(context.Context, string) ([]Reel, error)
+	GetReelsPaged(ctx context.Context, userID string, filter ReelFilter, pageable Pageable) ([]Reel, PaginationData, error)
 	GetReelByEmailConfirmationToken(context.Context, string) (*Reel, error)
 	CreateReel(context.Context, *Reel) error
 	UpdateReel(context.Context, *Reel) error
+	AssignReelsToUserByEmail(ctx context.Context, email string, userID string) error
 	AddRecipients(ctx context.Context, reel *Reel, recipients Recipients) error
 	DeleteRecipient(ctx context.Context, reel *Reel, recipientID string) error
 	DeleteReel(ctx context.Context, reelID string) error
