@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/ayo-awe/memoreel-be/config"
 	"github.com/ayo-awe/memoreel-be/database"
 	"github.com/stretchr/testify/require"
 )
@@ -14,8 +15,11 @@ var (
 )
 
 func getDB(t *testing.T) (database.Database, func()) {
-	// TODO: replace hardcoded dsn with config
-	db, err := NewDB("postgresql://postgres:postgres@localhost:5432/memoreel_test?sslmode=disable")
+
+	require.NoError(t, config.LoadConfig())
+	cfg := config.Get(config.Test)
+
+	db, err := NewDB(cfg)
 	_db = db
 
 	require.NoError(t, err)
